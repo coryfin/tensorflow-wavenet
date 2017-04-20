@@ -34,6 +34,8 @@ EPSILON = 0.001
 MOMENTUM = 0.9
 MAX_TO_KEEP = 5
 METADATA = False
+INPUT_LANG = 'sp'
+OUTPUT_LANG = 'en'
 
 
 def get_arguments():
@@ -103,6 +105,10 @@ def get_arguments():
     parser.add_argument('--max_checkpoints', type=int, default=MAX_TO_KEEP,
                         help='Maximum amount of checkpoints that will be kept alive. Default: '
                              + str(MAX_TO_KEEP) + '.')
+    parser.add_argument('--input_lang', type=str, default=INPUT_LANG,
+                        help='The input language for the neural network.')
+    parser.add_argument('--output_lang', type=str, default=OUTPUT_LANG,
+                        help='The output language for the neural network.')
     return parser.parse_args()
 
 

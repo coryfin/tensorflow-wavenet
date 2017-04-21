@@ -8,11 +8,12 @@ import librosa
 import numpy as np
 import tensorflow as tf
 
-FILE_PATTERN = r'p([0-9]+)_([0-9]+)\.wav'
+CATEGORY_FILE_PATTERN = r'p([0-9]+)_([0-9]+)\.wav'
+FILE_PATTERN = r'(?:\d\d-){3}[a-zA-Z]-(\d{3})-[a-zA-Z]{3}-[a-zA-Z]{2}\.wav'
 
 
 def get_category_cardinality(files):
-    id_reg_expression = re.compile(FILE_PATTERN)
+    id_reg_expression = re.compile(CATEGORY_FILE_PATTERN)
     min_id = None
     max_id = None
     for filename in files:
@@ -33,22 +34,26 @@ def randomize_files(files):
 
 
 def find_files(directory, pattern='*.wav'):
-    '''Recursively finds all files matching the pattern.'''
+    '''Recursively finds all files matching the pattern and with the specified language encoded in the filename.'''
     files = []
     for root, dirnames, filenames in os.walk(directory):
+        # TODO: filter by lang
         for filename in fnmatch.filter(filenames, pattern):
             files.append(os.path.join(root, filename))
     return files
 
 
-def load_generic_audio(directory, sample_rate):
+def load_generic_audio(directory, sample_rate, input_lang, output_lang):
+    # TODO: Modify this method to load input and output files in tandem
     '''Generator that yields audio waveforms from the directory.'''
     files = find_files(directory)
-    id_reg_exp = re.compile(FILE_PATTERN)
-    print("files length: {}".format(len(files)))
-    randomized_files = randomize_files(files)
-    for filename in randomized_files:
-        ids = id_reg_exp.findall(filename)
+    id_reg_exp = re.compile(CATEGORY_FILE_PATTERN)
+    speech_id_reg_exp = re.compile(FILE_PATTERN)
+    input_files = [file for file in files if 'org-' + input_lang in file]
+    print("input files length: {}".format(len(input_files)))
+    randomized_files = randomize_files(input_files)
+    for input_filename in randomized_files:
+        ids = id_reg_exp.findall(input_filename)
         if not ids:
             # The file name does not match the pattern containing ids, so
             # there is no id.
@@ -56,9 +61,26 @@ def load_generic_audio(directory, sample_rate):
         else:
             # The file name matches the pattern for containing ids.
             category_id = int(ids[0][0])
-        audio, _ = librosa.load(filename, sr=sample_rate, mono=True)
-        audio = audio.reshape(-1, 1)
-        yield audio, filename, category_id
+        ids = speech_id_reg_exp.findall(input_filename)
+        print("ids: " + str(ids))
+        if not ids:
+            # The file name does not match the pattern containing ids, so
+            # there is no id.
+            speech_id = None
+        else:
+            # The file name matches the pattern for containing ids.
+            speech_id = ids[0][0]
+        input_audio, _ = librosa.load(input_filename, sr=sample_rate, mono=True)
+        input_audio = input_audio.reshape(-1, 1)
+
+        # Load the corresponding output file
+        output_files = [file for file in files if speech_id + '-' + 'int-' + input_lang + '-' + output_lang in file]
+        output_filename = output_files[0]
+        output_audio, _ = librosa.load(output_filename, sr=sample_rate, mono=True)
+        output_audio = output_audio.reshape(-1, 1)
+
+        print("Input and output audio files loaded successfully")
+        yield input_audio, input_filename, output_audio, output_filename, category_id
 
 
 def trim_silence(audio, threshold, frame_length=2048):
@@ -76,7 +98,7 @@ def trim_silence(audio, threshold, frame_length=2048):
 def not_all_have_id(files):
     ''' Return true iff any of the filenames does not conform to the pattern
         we require for determining the category id.'''
-    id_reg_exp = re.compile(FILE_PATTERN)
+    id_reg_exp = re.compile(CATEGORY_FILE_PATTERN)
     for file in files:
         ids = id_reg_exp.findall(file)
         if not ids:
@@ -96,7 +118,9 @@ class AudioReader(object):
                  receptive_field,
                  sample_size=None,
                  silence_threshold=None,
-                 queue_size=32):
+                 queue_size=32,
+                 input_lang='es',
+                 output_lang='en'):
         self.audio_dir = audio_dir
         self.sample_rate = sample_rate
         self.coord = coord
@@ -110,6 +134,8 @@ class AudioReader(object):
                                          ['float32'],
                                          shapes=[(None, 1)])
         self.enqueue = self.queue.enqueue([self.sample_placeholder])
+        self.input_lang=input_lang
+        self.output_lang=output_lang
 
         if self.gc_enabled:
             self.id_placeholder = tf.placeholder(dtype=tf.int32, shape=())
@@ -144,49 +170,54 @@ class AudioReader(object):
             self.gc_category_cardinality = None
 
     def dequeue(self, num_elements):
+        # TODO: dequeue the output as well as the input
         output = self.queue.dequeue_many(num_elements)
         return output
 
     def dequeue_gc(self, num_elements):
+        # TODO: dequeue the output as well as the input
         return self.gc_queue.dequeue_many(num_elements)
 
     def thread_main(self, sess):
         stop = False
         # Go through the dataset multiple times
         while not stop:
-            iterator = load_generic_audio(self.audio_dir, self.sample_rate)
-            for audio, filename, category_id in iterator:
+            iterator = load_generic_audio(self.audio_dir, self.sample_rate, self.input_lang, self.output_lang)
+            for input_audio, input_filename, output_audio, output_filname, category_id in iterator:
+                # TODO: Use output_audio
                 if self.coord.should_stop():
                     stop = True
                     break
                 if self.silence_threshold is not None:
                     # Remove silence
-                    audio = trim_silence(audio[:, 0], self.silence_threshold)
-                    audio = audio.reshape(-1, 1)
-                    if audio.size == 0:
+                    input_audio = trim_silence(input_audio[:, 0], self.silence_threshold)
+                    input_audio = input_audio.reshape(-1, 1)
+                    if input_audio.size == 0:
                         print("Warning: {} was ignored as it contains only "
                               "silence. Consider decreasing trim_silence "
                               "threshold, or adjust volume of the audio."
-                              .format(filename))
+                              .format(input_filename))
 
-                audio = np.pad(audio, [[self.receptive_field, 0], [0, 0]],
+                input_audio = np.pad(input_audio, [[self.receptive_field, 0], [0, 0]],
                                'constant')
 
                 if self.sample_size:
                     # Cut samples into pieces of size receptive_field +
                     # sample_size with receptive_field overlap
-                    while len(audio) > self.receptive_field:
-                        piece = audio[:(self.receptive_field +
+                    # TODO: I think this is where we need to enqueue the output along with the input
+                    # TODO: Make sure the the input audio and output audio have the same number of samples
+                    while len(input_audio) > self.receptive_field:
+                        piece = input_audio[:(self.receptive_field +
                                         self.sample_size), :]
                         sess.run(self.enqueue,
                                  feed_dict={self.sample_placeholder: piece})
-                        audio = audio[self.sample_size:, :]
+                        input_audio = input_audio[self.sample_size:, :]
                         if self.gc_enabled:
                             sess.run(self.gc_enqueue, feed_dict={
                                 self.id_placeholder: category_id})
                 else:
                     sess.run(self.enqueue,
-                             feed_dict={self.sample_placeholder: audio})
+                             feed_dict={self.sample_placeholder: input_audio})
                     if self.gc_enabled:
                         sess.run(self.gc_enqueue,
                                  feed_dict={self.id_placeholder: category_id})

@@ -20,7 +20,7 @@ from tensorflow.python.client import timeline
 from wavenet import WaveNetModel, AudioReader, optimizer_factory
 
 BATCH_SIZE = 1
-DATA_DIRECTORY = './VCTK-Corpus'
+DATA_DIRECTORY = './corpus'
 LOGDIR_ROOT = './logdir'
 CHECKPOINT_EVERY = 50
 NUM_STEPS = int(1e5)
@@ -50,7 +50,7 @@ def get_arguments():
     parser.add_argument('--batch_size', type=int, default=BATCH_SIZE,
                         help='How many wav files to process at once. Default: ' + str(BATCH_SIZE) + '.')
     parser.add_argument('--data_dir', type=str, default=DATA_DIRECTORY,
-                        help='The directory containing the VCTK corpus.')
+                        help='The directory containing the EPIC corpus.')
     parser.add_argument('--store_metadata', type=bool, default=METADATA,
                         help='Whether to store advanced debugging information '
                         '(execution time, memory consumption) for use with '
@@ -214,7 +214,9 @@ def main():
     # Create coordinator.
     coord = tf.train.Coordinator()
 
-    # Load raw waveform from VCTK corpus.
+    print("Loading raw waveform...")
+
+    # Load raw waveform from EPIC corpus.
     with tf.name_scope('create_inputs'):
         # Allow silence trimming to be skipped by specifying a threshold near
         # zero.
@@ -232,11 +234,14 @@ def main():
                                                                    wavenet_params["initial_filter_width"]),
             sample_size=args.sample_size,
             silence_threshold=silence_threshold)
+        # TODO: dequeue the output as well as the input
         audio_batch = reader.dequeue(args.batch_size)
         if gc_enabled:
             gc_id_batch = reader.dequeue_gc(args.batch_size)
         else:
             gc_id_batch = None
+
+    print("Initializing WaveNet model...")
 
     # Create network.
     net = WaveNetModel(
@@ -254,6 +259,8 @@ def main():
         global_condition_channels=args.gc_channels,
         global_condition_cardinality=reader.gc_category_cardinality)
 
+    print("Setting up optimizer...")
+
     if args.l2_regularization_strength == 0:
         args.l2_regularization_strength = None
     loss = net.loss(input_batch=audio_batch,
@@ -265,16 +272,22 @@ def main():
     trainable = tf.trainable_variables()
     optim = optimizer.minimize(loss, var_list=trainable)
 
+    print("Setting up logging...")
+
     # Set up logging for TensorBoard.
     writer = tf.summary.FileWriter(logdir)
     writer.add_graph(tf.get_default_graph())
     run_metadata = tf.RunMetadata()
     summaries = tf.summary.merge_all()
 
+    print("Setting up session...")
+
     # Set up session
     sess = tf.Session(config=tf.ConfigProto(log_device_placement=False))
     init = tf.global_variables_initializer()
     sess.run(init)
+
+    print("Setting up saver...")
 
     # Saver for storing checkpoints of the model.
     saver = tf.train.Saver(var_list=tf.trainable_variables(), max_to_keep=args.max_checkpoints)
@@ -291,6 +304,8 @@ def main():
               "We will terminate training to avoid accidentally overwriting "
               "the previous model.")
         raise
+
+    print("Starting threads...")
 
     threads = tf.train.start_queue_runners(sess=sess, coord=coord)
     reader.start_threads(sess)

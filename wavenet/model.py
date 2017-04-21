@@ -621,6 +621,7 @@ class WaveNetModel(object):
 
     def loss(self,
              input_batch,
+             output_batch,
              global_condition_batch=None,
              l2_regularization_strength=None,
              name='wavenet'):
@@ -628,6 +629,7 @@ class WaveNetModel(object):
 
         The variables are all scoped to the given name.
         '''
+        # TODO: use output_batch
         with tf.name_scope(name):
             # We mu-law encode and quantize the input audioform.
             encoded_input = mu_law_encode(input_batch,

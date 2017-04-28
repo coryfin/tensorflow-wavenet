@@ -405,6 +405,7 @@ class WaveNetModel(object):
 
         current_layer = self._create_causal_layer(current_layer)
 
+        # TODO: the output should be the same shape as the input?
         output_width = tf.shape(input_batch)[1] - self.receptive_field + 1
 
         # Add all defined dilation layers.
@@ -598,6 +599,7 @@ class WaveNetModel(object):
 
     def predict_proba_incremental(self, waveform, global_condition=None,
                                   name='wavenet'):
+        # TODO: I think we can just delete this method
         '''Computes the probability distribution of the next sample
         incrementally, based on a single sample and all previously passed
         samples.'''
@@ -632,26 +634,29 @@ class WaveNetModel(object):
         The variables are all scoped to the given name.
         '''
         with tf.name_scope(name):
+            # TODO: pad output or input to make sure they have the same # of samples???
+
             # We mu-law encode and quantize the input audioform.
             encoded_input = mu_law_encode(input_batch,
                                           self.quantization_channels)
+            encoded_output = mu_law_encode(output_batch,
+                                          self.quantization_channels)
 
             gc_embedding = self._embed_gc(global_condition_batch)
-            encoded = self._one_hot(encoded_input)
+            encoded_input = self._one_hot(encoded_input)
+            encoded_output = self._one_hot(encoded_output)
             if self.scalar_input:
                 network_input = tf.reshape(
                     tf.cast(input_batch, tf.float32),
                     [self.batch_size, -1, 1])
             else:
-                network_input = encoded
+                network_input = encoded_input
 
             # Cut off the last sample of network input to preserve causality.
+            # TODO: Might need to modify this since we're using output batch as well???
             network_input_width = tf.shape(network_input)[1] - 1
-            network_input = tf.slice(network_input, [0, 0, 0],
-                                     [-1, network_input_width, -1])
+            network_input = tf.slice(network_input, [0, 0, 0], [-1, network_input_width, -1])
 
-            # TODO: use output_batch
-            # TODO: pad output_batch or input batch to make sure they have the same # of samples
             raw_output = self._create_network(network_input, gc_embedding)
 
             with tf.name_scope('loss'):
@@ -659,7 +664,7 @@ class WaveNetModel(object):
                 # for the first predicted sample.
                 target_output = tf.slice(
                     tf.reshape(
-                        encoded,
+                        encoded_output,
                         [self.batch_size, -1, self.quantization_channels]),
                     [0, self.receptive_field, 0],
                     [-1, -1, -1])

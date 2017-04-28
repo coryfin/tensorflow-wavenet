@@ -44,7 +44,6 @@ def find_files(directory, pattern='*.wav'):
 
 
 def load_generic_audio(directory, sample_rate, input_lang, output_lang):
-    # TODO: Modify this method to load input and output files in tandem
     '''Generator that yields audio waveforms from the directory.'''
     files = find_files(directory)
     id_reg_exp = re.compile(CATEGORY_FILE_PATTERN)
@@ -129,13 +128,14 @@ class AudioReader(object):
         self.silence_threshold = silence_threshold
         self.gc_enabled = gc_enabled
         self.threads = []
-        self.sample_placeholder = tf.placeholder(dtype=tf.float32, shape=None)
+        self.input_placeholder = tf.placeholder(dtype=tf.float32, shape=None)
+        self.output_placeholder = tf.placeholder(dtype=tf.float32, shape=None)
         self.queue = tf.PaddingFIFOQueue(queue_size,
-                                         ['float32'],
-                                         shapes=[(None, 1)])
-        self.enqueue = self.queue.enqueue([self.sample_placeholder])
-        self.input_lang=input_lang
-        self.output_lang=output_lang
+                                         ['float32', 'float32'],
+                                         shapes=[(None, 1), (None, 1)])
+        self.enqueue = self.queue.enqueue([self.input_placeholder, self.output_placeholder])
+        self.input_lang = input_lang
+        self.output_lang = output_lang
 
         if self.gc_enabled:
             self.id_placeholder = tf.placeholder(dtype=tf.int32, shape=())
@@ -170,12 +170,10 @@ class AudioReader(object):
             self.gc_category_cardinality = None
 
     def dequeue(self, num_elements):
-        # TODO: dequeue the output as well as the input
         output = self.queue.dequeue_many(num_elements)
         return output
 
     def dequeue_gc(self, num_elements):
-        # TODO: dequeue the output as well as the input
         return self.gc_queue.dequeue_many(num_elements)
 
     def thread_main(self, sess):
@@ -183,41 +181,47 @@ class AudioReader(object):
         # Go through the dataset multiple times
         while not stop:
             iterator = load_generic_audio(self.audio_dir, self.sample_rate, self.input_lang, self.output_lang)
-            for input_audio, input_filename, output_audio, output_filname, category_id in iterator:
-                # TODO: Use output_audio
+            for input_audio, input_filename, output_audio, output_filename, category_id in iterator:
                 if self.coord.should_stop():
                     stop = True
                     break
                 if self.silence_threshold is not None:
                     # Remove silence
                     input_audio = trim_silence(input_audio[:, 0], self.silence_threshold)
+                    output_audio = trim_silence(output_audio[:, 0], self.silence_threshold)
                     input_audio = input_audio.reshape(-1, 1)
+                    output_audio = output_audio.reshape(-1, 1)
                     if input_audio.size == 0:
                         print("Warning: {} was ignored as it contains only "
                               "silence. Consider decreasing trim_silence "
                               "threshold, or adjust volume of the audio."
                               .format(input_filename))
+                    if output_audio.size == 0:
+                        print("Warning: {} was ignored as it contains only "
+                              "silence. Consider decreasing trim_silence "
+                              "threshold, or adjust volume of the audio."
+                              .format(output_filename))
 
-                input_audio = np.pad(input_audio, [[self.receptive_field, 0], [0, 0]],
-                               'constant')
+                input_audio = np.pad(input_audio, [[self.receptive_field, 0], [0, 0]], 'constant')
+                output_audio = np.pad(output_audio, [[self.receptive_field, 0], [0, 0]], 'constant')
 
+                # TODO: Make sure the the input audio and output audio have the same number of samples
                 if self.sample_size:
                     # Cut samples into pieces of size receptive_field +
                     # sample_size with receptive_field overlap
-                    # TODO: I think this is where we need to enqueue the output along with the input
-                    # TODO: Make sure the the input audio and output audio have the same number of samples
                     while len(input_audio) > self.receptive_field:
-                        piece = input_audio[:(self.receptive_field +
-                                        self.sample_size), :]
+                        input_piece = input_audio[:(self.receptive_field + self.sample_size), :]
+                        output_piece = output_audio[:(self.receptive_field + self.sample_size), :]
                         sess.run(self.enqueue,
-                                 feed_dict={self.sample_placeholder: piece})
+                                 feed_dict={self.input_placeholder: input_piece, self.output_placeholder: output_piece})
                         input_audio = input_audio[self.sample_size:, :]
+                        output_audio = output_audio[self.sample_size:, :]
                         if self.gc_enabled:
                             sess.run(self.gc_enqueue, feed_dict={
                                 self.id_placeholder: category_id})
                 else:
                     sess.run(self.enqueue,
-                             feed_dict={self.sample_placeholder: input_audio})
+                             feed_dict={self.input_placeholder: input_audio, self.output_placeholder: output_audio})
                     if self.gc_enabled:
                         sess.run(self.gc_enqueue,
                                  feed_dict={self.id_placeholder: category_id})

@@ -29,12 +29,12 @@ WAVENET_PARAMS = './wavenet_params.json'
 STARTED_DATESTRING = "{0:%Y-%m-%dT%H-%M-%S}".format(datetime.now())
 SAMPLE_SIZE = 100000
 L2_REGULARIZATION_STRENGTH = 0
-SILENCE_THRESHOLD = 0.3
+SILENCE_THRESHOLD = 0.2
 EPSILON = 0.001
 MOMENTUM = 0.9
 MAX_TO_KEEP = 5
 METADATA = False
-INPUT_LANG = 'sp'
+INPUT_LANG = 'es'
 OUTPUT_LANG = 'en'
 
 
@@ -234,8 +234,9 @@ def main():
                                                                    wavenet_params["initial_filter_width"]),
             sample_size=args.sample_size,
             silence_threshold=silence_threshold)
-        # TODO: dequeue the output as well as the input
         audio_batch = reader.dequeue(args.batch_size)
+        input_batch = audio_batch[0]
+        output_batch = audio_batch[1]
         if gc_enabled:
             gc_id_batch = reader.dequeue_gc(args.batch_size)
         else:
@@ -263,9 +264,8 @@ def main():
 
     if args.l2_regularization_strength == 0:
         args.l2_regularization_strength = None
-    # TODO: pass in output audio to loss
-    loss = net.loss(input_batch=audio_batch,
-                    output_batch=audio_batch,
+    loss = net.loss(input_batch=input_batch,
+                    output_batch=output_batch,
                     global_condition_batch=gc_id_batch,
                     l2_regularization_strength=args.l2_regularization_strength)
     optimizer = optimizer_factory[args.optimizer](

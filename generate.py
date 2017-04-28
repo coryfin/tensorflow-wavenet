@@ -38,6 +38,7 @@ def get_arguments():
     parser = argparse.ArgumentParser(description='WaveNet generation script')
     parser.add_argument(
         'checkpoint', type=str, help='Which model checkpoint to generate from')
+    # TODO: Don't need this argument since we're using input audio
     parser.add_argument(
         '--samples',
         type=int,
@@ -69,11 +70,13 @@ def get_arguments():
         type=int,
         default=SAVE_EVERY,
         help='How many samples before saving in-progress wav')
+    # TODO: don't use fast_generation? as this will condition output on previous outputs?
     parser.add_argument(
         '--fast_generation',
         type=_str_to_bool,
         default=True,
         help='Use fast generation')
+    # TODO: Don't need this argument since we're using input audio
     parser.add_argument(
         '--wav_seed',
         type=str,
@@ -133,6 +136,7 @@ def create_seed(filename,
 
 
 def main():
+    # TODO: Need to modify this so that it generates from input audio rather than from previously generated samples
     args = get_arguments()
     started_datestring = "{0:%Y-%m-%dT%H-%M-%S}".format(datetime.now())
     logdir = os.path.join(args.logdir, 'generate', started_datestring)
@@ -155,11 +159,14 @@ def main():
         global_condition_channels=args.gc_channels,
         global_condition_cardinality=args.gc_cardinality)
 
+    # TODO: store input samples and output samples separately
     samples = tf.placeholder(tf.int32)
 
     if args.fast_generation:
+        # TODO: pass input samples
         next_sample = net.predict_proba_incremental(samples, args.gc_id)
     else:
+        # TODO: pass input samples
         next_sample = net.predict_proba(samples, args.gc_id)
 
     if args.fast_generation:
@@ -174,21 +181,25 @@ def main():
     print('Restoring model from {}'.format(args.checkpoint))
     saver.restore(sess, args.checkpoint)
 
+    # TODO: should this be input samples or output samples?
     decode = mu_law_decode(samples, wavenet_params['quantization_channels'])
 
     quantization_channels = wavenet_params['quantization_channels']
     if args.wav_seed:
+        # TODO: make sure we don't pass in a wav_seed program argument so this code never gets called
         seed = create_seed(args.wav_seed,
                            wavenet_params['sample_rate'],
                            quantization_channels,
                            net.receptive_field)
         waveform = sess.run(seed).tolist()
     else:
+        # TODO: use input audio instead
         # Silence with a single random sample at the end.
         waveform = [quantization_channels / 2] * (net.receptive_field - 1)
         waveform.append(np.random.randint(quantization_channels))
 
     if args.fast_generation and args.wav_seed:
+        # TODO: Don't pass in wav_seed program arg so this code never gets called
         # When using the incremental generation, we need to
         # feed in all priming samples one by one before starting the
         # actual generation.
@@ -207,6 +218,7 @@ def main():
 
     last_sample_timestamp = datetime.now()
     for step in range(args.samples):
+        # TODO: Make sure input samples are being used here
         if args.fast_generation:
             outputs = [next_sample]
             outputs.extend(net.push_ops)

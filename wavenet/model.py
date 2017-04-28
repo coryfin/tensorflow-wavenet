@@ -448,6 +448,8 @@ class WaveNetModel(object):
 
     def _create_generator(self, input_batch, global_condition_batch):
         '''Construct an efficient incremental generator.'''
+        # TODO: generation doesn't have to be incremental when testing, since we have the whole audio input file
+        # TODO: use input, not previously generated output, or use predict_prob, not predict_proba_incremental
         init_ops = []
         push_ops = []
         outputs = []
@@ -629,7 +631,6 @@ class WaveNetModel(object):
 
         The variables are all scoped to the given name.
         '''
-        # TODO: use output_batch
         with tf.name_scope(name):
             # We mu-law encode and quantize the input audioform.
             encoded_input = mu_law_encode(input_batch,
@@ -649,6 +650,8 @@ class WaveNetModel(object):
             network_input = tf.slice(network_input, [0, 0, 0],
                                      [-1, network_input_width, -1])
 
+            # TODO: use output_batch
+            # TODO: pad output_batch or input batch to make sure they have the same # of samples
             raw_output = self._create_network(network_input, gc_embedding)
 
             with tf.name_scope('loss'):

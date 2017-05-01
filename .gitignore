@@ -5,3 +5,5 @@ VCTK-Corpus/
 .idea
 S0323/
 corpus/
+*.wav
+
